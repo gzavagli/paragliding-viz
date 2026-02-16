@@ -1,73 +1,64 @@
-# React + TypeScript + Vite
+# Paragliding Task Viewer
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A 3D visualization tool for paragliding flights, designed to help pilots analyze their tracks and compare them against official competition tasks.
 
-Currently, two official plugins are available:
+Built with **React**, **TypeScript**, **Vite**, and **CesiumJS** (via Resium).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Features
 
-## React Compiler
+*   **3D Flight Visualization**: Load and view `.igc` track logs in a high-fidelity 3D environment with terrain.
+*   **Competition Task Support**: Load `.xctsk` task files to visualize turnpoints, cylinders, and optimized flight paths.
+*   **Multi-Track Comparison**: Load multiple pilots simultaneously to compare routes and performance side-by-side.
+*   **Advanced Playback**:
+    *   Play, Pause, and Seek through the flight timeline.
+    *   Variable playback speeds (1x, 10x, 20x, 50x).
+    *   Synchronized time slider.
+*   **Live Statistics**: Real-time display of Ground Speed, Vertical Speed (Vario), and Altitude Above Ground (AGL).
+*   **Map Overlays**:
+    *   **3D Terrain**: ArcGIS World Elevation for realistic mountain rendering.
+    *   **Thermal Maps**: Integration with KK7 Thermal Maps (Hotspots/Skyways) to visualize lift potential.
+*   **Smart Features**:
+    *   **Auto-Zoom**: Automatically focuses on the task or track area.
+    *   **Timezone Detection**: Automatically detects the correct local timezone based on the task or track location.
+    *   **Scoring-Lite**: Visualizes the optimized task distance (shortest path touching all cylinders).
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Getting Started
 
-## Expanding the ESLint configuration
+### Prerequisites
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+*   Node.js (v18 or higher recommended)
+*   npm or yarn
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Installation
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/yourusername/paragliding-viz.git
+    cd paragliding-viz
+    ```
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+2.  Install dependencies:
+    ```bash
+    npm install
+    ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+3.  Start the development server:
+    ```bash
+    npm run dev
+    ```
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+4.  Open your browser at `http://localhost:5173`.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Product Requirements
+
+For a detailed breakdown of the functional and non-functional requirements, features, and future roadmap, please refer to the **[Product Requirements Document (PRD)](./prd.md)**.
+
+## Project Structure
+
+*   `src/components`: React components (Viewer, TaskLoader, PlaybackControls, etc.)
+*   `src/types`: TypeScript interfaces for IGC files, Tasks, and Stats.
+*   `src/utils`: Helper functions for file parsing (IGC, XCTSK) and geographic calculations.
+
+## License
+
+[MIT](LICENSE)
