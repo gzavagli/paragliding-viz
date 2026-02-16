@@ -31,7 +31,7 @@
 *   **Key Capabilities:**
     *   **XCTSK File Support:** Parse `.xctsk` files (XCSoar/XCTrack format).
     *   **Task Geometry:** Render turnpoint cylinders with competition-standard coloring (Red=Start, Yellow=Turnpoint, Orange=Goal).
-    *   **Optimized Path:** Calculate and display the shortness possible path (Optimized Task Distance) touching all cylinders.
+    *   **Optimized Path:** Calculate and display the shortest possible path (Optimized Task Distance) touching all cylinders. The shortest path should be calculated using the same algorithm as XCSoar. The shortest path should be rendered as a line on the ground, wide enough to include arrows in regular intervals showing the direction to the next turnpoint. 
     *   **Task Info Panel:** Display segment distances, open/close times, and total task distance.
     *   **Auto-Zoom:** Automatically position the camera to frame the entire task area.
 

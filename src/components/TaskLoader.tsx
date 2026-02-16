@@ -10,7 +10,7 @@ interface TaskLoaderProps {
   trackDate?: Date;
 }
 
-const TaskLoader: React.FC<TaskLoaderProps> = ({ onTaskLoaded, task, timezone = 'UTC', trackDate }) => {
+const TaskLoader: React.FC<TaskLoaderProps> = ({ onTaskLoaded, task }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isCollapsed, setIsCollapsed] = React.useState(false);
 

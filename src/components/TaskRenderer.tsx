@@ -1,16 +1,35 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Entity as ResiumEntity } from 'resium';
-import { Cartesian3, Cartographic, Color, ColorMaterialProperty, JulianDate, TimeInterval, TimeIntervalCollectionProperty } from 'cesium';
+import {
+  Cartesian3,
+  Cartographic,
+  Color,
+  JulianDate,
+  TimeInterval,
+  TimeIntervalCollectionProperty,
+  GeometryInstance,
+  DistanceDisplayConditionGeometryInstanceAttribute,
+  ColorGeometryInstanceAttribute,
+  ColorMaterialProperty,
+  PolygonGeometry,
+  PolygonHierarchy,
+  Matrix4,
+  PerInstanceColorAppearance,
+} from 'cesium';
+import * as Cesium from 'cesium';
 import { type XCTask } from '../types/task';
 import { calculateOptimizedPath } from '../utils/optimization';
+import { GroundPrimitive as ResiumGroundPrimitive } from 'resium';
 
 interface TaskRendererProps {
-  task: XCTask;
-  trackDate?: Date; // The date of the flight (UTC midnight), used to anchor task times
-  timezone?: string; // Timezone to interpret task times (e.g. "Europe/Paris")
+  task: XCTask | null;
+  trackDate?: Date;
+  timezone?: string;
+  showTask?: boolean;
 }
 
-const TaskRenderer: React.FC<TaskRendererProps> = ({ task, trackDate, timezone = 'UTC' }) => {
+const TaskRenderer: React.FC<TaskRendererProps> = ({ task, trackDate, timezone = 'UTC', showTask = true }) => {
+  if (!showTask) return null;
   if (!task || !task.turnpoints) return null;
 
   // Helper to parse time string (HH:MM:SS or ISO) into JulianDate, treating it as LOCAL time in the given timezone
@@ -160,31 +179,162 @@ const TaskRenderer: React.FC<TaskRendererProps> = ({ task, trackDate, timezone =
         );
       })}
 
-      {/* Optimized Path Curtain */}
-      {optimizedPath && (() => {
-        const positions = optimizedPath;
-        const cartographics = optimizedPath.map(p => Cartographic.fromCartesian(p));
+      {/* Optimized Path: Wide Line on Ground */}
+      {optimizedPath && (
+        <ResiumEntity
+          name="Optimized Path Line"
+          polyline={{
+            positions: optimizedPath,
+            width: 30,
+            material: Color.PURPLE.withAlpha(0.6),
+            clampToGround: true,
+            zIndex: 0
+          }}
+        />
+      )}
 
-        // Ensure we have valid heights
-        const minimumHeights = cartographics.map(c => (c.height || 0) - 2000);
-        const maximumHeights = cartographics.map(c => (c.height || 0) + 2000);
-
-        return (
-          <ResiumEntity
-            name="Optimized Path"
-            wall={{
-              positions: positions,
-              minimumHeights: minimumHeights,
-              maximumHeights: maximumHeights,
-              material: Color.PURPLE.withAlpha(0.3),
-              outline: true,
-              outlineColor: Color.BLACK.withAlpha(0.5)
-            }}
-          />
-        );
-      })()}
+      {/* Optimized Path Arrows (LOD using GroundPrimitives) */}
+      {optimizedPath && (
+        <ArrowPrimitives optimizedPath={optimizedPath} />
+      )}
     </>
   );
 };
 
+// Sub-component to handle expensive geometry creation
+const ArrowPrimitives = React.memo(({ optimizedPath }: { optimizedPath: Cartesian3[] }) => {
+  // Memoize the geometry instances (Expensive cpu work)
+  const geometryInstances = useMemo(() => {
+    const instances: GeometryInstance[] = [];
+
+    // LOD Levels
+    const lods = [
+      { spacing: 100, min: 0, max: 4000, size: 20 },
+      { spacing: 500, min: 4000, max: 20000, size: 80 },
+      { spacing: 2000, min: 20000, max: 80000, size: 300 },
+      { spacing: 8000, min: 80000, max: Number.MAX_VALUE, size: 1000 }
+    ];
+
+    // Create reusable color attribute
+    const whiteColorAttribute = ColorGeometryInstanceAttribute.fromColor(Color.WHITE);
+
+    lods.forEach(lod => {
+      let currentDist = 0;
+      let nextSample = lod.spacing / 2;
+
+      // Create reusable distance display condition attribute for this LOD
+      const distanceDisplayConditionAttribute = new DistanceDisplayConditionGeometryInstanceAttribute(
+        lod.min,
+        lod.max
+      );
+
+      for (let i = 0; i < optimizedPath.length - 1; i++) {
+        const p1 = optimizedPath[i];
+        const p2 = optimizedPath[i + 1];
+        const segLen = Cartesian3.distance(p1, p2);
+
+        // Cache p2 cartographic for bearing calculation
+        const c2 = Cartographic.fromCartesian(p2);
+
+        while (currentDist + segLen > nextSample) {
+          const t = (nextSample - currentDist) / segLen;
+          const pos = Cartesian3.lerp(p1, p2, t, new Cartesian3());
+
+          // Bearing Calculation from CURRENT arrow position to next point
+          const c1 = Cartographic.fromCartesian(pos);
+          const dLon = c2.longitude - c1.longitude;
+          const y = Math.sin(dLon) * Math.cos(c2.latitude);
+          const x = Math.cos(c1.latitude) * Math.sin(c2.latitude) -
+            Math.sin(c1.latitude) * Math.cos(c2.latitude) * Math.cos(dLon);
+          const bearing = Math.atan2(y, x);
+
+          // Create Arrow Polygon Geometry
+          // We define a triangle in the Local East-North-Up (ENU) frame and transform to World.
+          // Triangle points North (bearing 0):
+          // Top: (0, size/2)
+          // BottomLeft: (-size/2, -size/2)
+          // BottomRight: (size/2, -size/2)
+          // (Adjusted scale for aspect ratio: Top y=size, Base y=-size is nicer?)
+          // Let's use:
+          // Top: (0, size/2)
+          // BL: (-size/3, -size/2)
+          // BR: (size/3, -size/2)
+
+          const size = lod.size;
+          const halfSize = size / 2;
+          const width = size / 3;
+
+          // Points in Frame: North (Y-axis) is 0 bearing.
+          // Rotate points by -bearing (CW) to align with bearing.
+          // Wait, standard rotation is CCW.
+          // Bearing is CW from North (Y).
+          // If Bearing = 90 (East, X).
+          // We want Top to be (size/2, 0).
+          // Rotation required: -90 deg (CCW).
+          // So rotate by -bearing.
+
+          const cosB = Math.cos(-bearing);
+          const sinB = Math.sin(-bearing);
+
+          // Local Points (Pre-rotation, pointing North)
+          const localPoints = [
+            { x: 0, y: halfSize },      // Top
+            { x: -width, y: -halfSize }, // Bottom Left
+            { x: width, y: -halfSize }   // Bottom Right
+          ];
+
+          // Transform to World
+          const enuTransform = Cesium.Transforms.eastNorthUpToFixedFrame(pos);
+
+          const polygonPositions = localPoints.map(pt => {
+            // 1. Rotate in 2D (around Z-axis of ENU)
+            const rx = pt.x * cosB - pt.y * sinB;
+            const ry = pt.x * sinB + pt.y * cosB;
+
+            // 2. ENU to World
+            // enuTransform * (rx, ry, 0, 1)
+            // Manual multiplication for speed/simplicity or Matrix4.multiplyByPoint?
+            return Matrix4.multiplyByPoint(enuTransform, new Cartesian3(rx, ry, 0), new Cartesian3());
+          });
+
+          const geometry = new PolygonGeometry({
+            polygonHierarchy: new PolygonHierarchy(polygonPositions),
+            height: 0
+          });
+
+          instances.push(new GeometryInstance({
+            geometry: geometry,
+            attributes: {
+              distanceDisplayCondition: distanceDisplayConditionAttribute,
+              color: whiteColorAttribute
+            }
+          }));
+
+          nextSample += lod.spacing;
+        }
+        currentDist += segLen;
+      }
+    });
+
+    return instances;
+  }, [optimizedPath]);
+
+  // Use PerInstanceColorAppearance for solid colored polygons
+  const appearance = useMemo(() => {
+    return new PerInstanceColorAppearance({
+      flat: true,
+      translucent: false
+    });
+  }, []);
+
+  if (geometryInstances.length === 0) return null;
+
+  return (
+    <ResiumGroundPrimitive
+      geometryInstances={geometryInstances}
+      appearance={appearance}
+      asynchronous={false}
+    />
+  );
+});
 export default React.memo(TaskRenderer);
