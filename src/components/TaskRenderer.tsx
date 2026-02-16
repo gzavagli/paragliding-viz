@@ -7,58 +7,66 @@ import { calculateOptimizedPath } from '../utils/optimization';
 interface TaskRendererProps {
   task: XCTask;
   trackDate?: Date; // The date of the flight (UTC midnight), used to anchor task times
-  timezone?: string; // Timezone of the flight/task location
+  timezone?: string; // Timezone to interpret task times (e.g. "Europe/Paris")
 }
 
-const TaskRenderer: React.FC<TaskRendererProps> = ({ task, trackDate, timezone }) => {
+const TaskRenderer: React.FC<TaskRendererProps> = ({ task, trackDate, timezone = 'UTC' }) => {
   if (!task || !task.turnpoints) return null;
 
-  // Helper to parse "HH:MM:SS" (Local Task Time) into a JulianDate (UTC)
+  // Helper to parse time string (HH:MM:SS or ISO) into JulianDate, treating it as LOCAL time in the given timezone
   const parseTime = (timeStr: string): JulianDate | null => {
     if (!trackDate) return null;
     try {
-      // Remove 'Z' if present
-      const cleanTime = timeStr.replace('Z', '');
-      const [h, m, s] = cleanTime.split(':').map(Number);
+      // 1. Strip 'Z' or offsets to get raw "HH:MM:SS"
+      // If user provided 13:00Z, we treat it as 13:00 Local.
+      let cleanTime = timeStr.replace('Z', '');
+      // Remove offset if present (e.g. +02:00) 
+      // Simple regex for +/-HH:MM at end?
+      // ISO8601 offset: (+|-)HH:MM or (+|-)HHMM or (+|-)HH
+      cleanTime = cleanTime.replace(/([+-]\d{2}:?\d{2})$/, '');
 
-      const utcDate = new Date(trackDate);
-      utcDate.setUTCHours(h, m, s, 0);
+      const parts = cleanTime.split(':');
+      if (parts.length < 2) return null;
 
-      // Adjust for timezone if present (Offset logic)
-      if (timezone) {
-        try {
-          const formatter = new Intl.DateTimeFormat('en-US', {
-            timeZone: timezone,
-            hour12: false,
-            year: 'numeric',
-            month: 'numeric',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: 'numeric',
-            second: 'numeric'
-          });
+      const hours = parseInt(parts[0], 10);
+      const minutes = parseInt(parts[1], 10);
+      const seconds = parts.length > 2 ? parseInt(parts[2], 10) : 0;
 
-          const parts = formatter.formatToParts(utcDate);
-          const getPart = (type: string) => parseInt(parts.find(p => p.type === type)?.value || '0');
-
-          const zoneH = getPart('hour');
-          const zoneM = getPart('minute');
-
-          let hourDiff = utcDate.getUTCHours() - zoneH;
-          let minDiff = utcDate.getUTCMinutes() - zoneM;
-
-          let totalDiffMinutes = (hourDiff * 60) + minDiff;
-
-          if (totalDiffMinutes > 720) totalDiffMinutes -= 1440;
-          if (totalDiffMinutes < -720) totalDiffMinutes += 1440;
-
-          utcDate.setMinutes(utcDate.getMinutes() + totalDiffMinutes);
-        } catch (err) {
-          console.warn("Timezone calc error", err);
-        }
+      // 2. Construct a UTC date that REPRESENTS this local time
+      // We want to find a UTC timestamp X such that X in 'timezone' reads as 'hours:minutes:seconds'
+      
+      // Heuristic: Use Intl.DateTimeFormat to find the offset of 'trackDate' in 'timezone'
+      // This assumes the offset is constant for the day (valid for paragliding tasks usually)
+      
+      const testDate = new Date(trackDate);
+      testDate.setUTCHours(12, 0, 0, 0); // Noon UTC as probe
+      
+      // Get offset string: "GMT+2" or "GMT-07:00"
+      // Note: timeZoneName: 'longOffset' returns "GMT+02:00"
+      const typeFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        timeZoneName: 'longOffset'
+      });
+      
+      const partsFormat = typeFormatter.formatToParts(testDate);
+      const offsetPart = partsFormat.find(p => p.type === 'timeZoneName')?.value; // "GMT+02:00" -> extract +02:00
+      
+      let isoOffset = 'Z';
+      if (offsetPart && offsetPart.includes('GMT')) {
+        const rawOffset = offsetPart.replace('GMT', '');
+        if (rawOffset) isoOffset = rawOffset; // "+02:00"
+      } else if (timezone === 'UTC') {
+        isoOffset = 'Z';
       }
 
-      return JulianDate.fromIso8601(utcDate.toISOString());
+      // 3. Construct ISO string with the Correct TARGET Offset
+      // If we want "12:00:00 Local", and Local is +02:00, we write "YYYY-MM-DDT12:00:00+02:00"
+      // Cesium/Date will parse this correctly into the absolute UTC instant.
+      
+      const datePart = trackDate.toISOString().split('T')[0];
+      const fullIso = `${datePart}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}${isoOffset}`;
+
+      return JulianDate.fromIso8601(fullIso);
     } catch (e) {
       console.warn("Failed to parse task time:", timeStr, e);
       return null;

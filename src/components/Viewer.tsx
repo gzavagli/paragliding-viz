@@ -1,13 +1,12 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { JulianDate, Cartesian3, Color, TimeIntervalCollection, TimeInterval, SampledPositionProperty, PathGraphics, ArcGISTiledElevationTerrainProvider, LagrangePolynomialApproximation, ClockRange, BoundingSphere, HeadingPitchRange, Math as CesiumMath, LabelStyle, VerticalOrigin, Cartesian2, DistanceDisplayCondition, Cartographic } from 'cesium';
+import { JulianDate, Cartesian3, Color, TimeIntervalCollection, TimeInterval, SampledPositionProperty, PathGraphics, ArcGISTiledElevationTerrainProvider, LagrangePolynomialApproximation, ClockRange, BoundingSphere, HeadingPitchRange, Math as CesiumMath, LabelStyle, VerticalOrigin, Cartesian2, DistanceDisplayCondition, Cartographic, UrlTemplateImageryProvider, ImageryLayer } from 'cesium';
 import { Viewer as CesiumViewer, Entity } from 'resium';
 import type { IGCFile, PilotStats } from '../types/igc';
 import PlaybackControls from './PlaybackControls';
 import HelpOverlay from './HelpOverlay';
 import type { XCTask } from '../types/task';
 import TaskRenderer from './TaskRenderer';
-
 interface ViewerProps {
   tracks: IGCFile[];
   task: XCTask | null;
@@ -16,6 +15,9 @@ interface ViewerProps {
   visibility: Record<string, boolean>;
   timezone: string;
   onStatsUpdate?: (stats: Record<string, PilotStats>) => void;
+  showThermal?: boolean;
+  thermalOpacity?: number;
+  showTask?: boolean;
 }
 
 const getInitials = (name?: string): string => {
@@ -25,9 +27,78 @@ const getInitials = (name?: string): string => {
   if (parts.length === 1) return parts[0].substring(0, 3).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
-
-const Viewer: React.FC<ViewerProps> = ({ tracks, task, trackDate, trailLength, visibility, timezone, onStatsUpdate }) => {
+const Viewer: React.FC<ViewerProps> = ({
+  tracks, task, trackDate, trailLength, visibility, timezone, onStatsUpdate,
+  showThermal = false, thermalOpacity = 0.5, showTask = true
+}) => {
   const viewerRef = useRef<any>(null);
+
+  // ... existing state ...
+
+  // Thermal Layer Effect
+  const thermalErrorCount = useRef(0);
+  const [thermalDisabled, setThermalDisabled] = useState(false);
+
+  useEffect(() => {
+    if (viewerRef.current && viewerRef.current.cesiumElement) {
+      const viewer = viewerRef.current.cesiumElement;
+      const layers = viewer.imageryLayers;
+
+      let thermalLayer: ImageryLayer | null = null;
+
+      // Find existing thermal layer
+      for (let i = 0; i < layers.length; i++) {
+        const layer = layers.get(i);
+        if (layer.imageryProvider instanceof UrlTemplateImageryProvider &&
+          (layer.imageryProvider as any).url.indexOf('thermal.kk7.ch') !== -1) {
+          thermalLayer = layer;
+          break;
+        }
+      }
+
+      // If we disabled it due to errors, ensure it is removed/hidden
+      if (thermalDisabled) {
+        if (thermalLayer) {
+          layers.remove(thermalLayer);
+        }
+        return;
+      }
+
+      if (showThermal) {
+        if (!thermalLayer) {
+          const provider = new UrlTemplateImageryProvider({
+            url: 'https://thermal.kk7.ch/tiles/thermal/{z}/{x}/{y}.png',
+            maximumLevel: 12,
+            credit: 'KK7 Thermal Map'
+          });
+
+          // Handle connection errors
+          provider.errorEvent.addEventListener((event) => {
+            thermalErrorCount.current++;
+            if (thermalErrorCount.current > 5) {
+              console.warn("KK7 Thermal Map appears unreachable. Disabling layer to prevent errors.");
+              setThermalDisabled(true); // This will trigger re-run and remove the layer
+            } else if (thermalErrorCount.current === 1) {
+              // Log first error only to avoid spam, but keep counting
+              console.warn("KK7 Thermal Map Error (likely connection refused):", event);
+            }
+          });
+
+          thermalLayer = layers.addImageryProvider(provider);
+        }
+        if (thermalLayer) {
+          thermalLayer.alpha = thermalOpacity;
+          thermalLayer.show = true;
+        }
+      } else {
+        if (thermalLayer) {
+          thermalLayer.show = false;
+        }
+      }
+    }
+  }, [showThermal, thermalOpacity, thermalDisabled]);
+
+  // ... rest of component ...
   const [isPlaying, setIsPlaying] = useState(false);
   const [multiplier, setMultiplier] = useState(10);
   const [currentTime, setCurrentTime] = useState<JulianDate>(trackDate);
@@ -375,7 +446,7 @@ const Viewer: React.FC<ViewerProps> = ({ tracks, task, trackDate, trailLength, v
         creditContainer={creditContainer}
       >
         {/* Render Task */}
-        {task && <TaskRenderer task={task} trackDate={trackDateJs} timezone={timezone} />}
+        {showTask && task && <TaskRenderer task={task} trackDate={trackDateJs} timezone={timezone} />}
 
         {/* Render Tracks */}
         {trackEntities.map((entity) => {

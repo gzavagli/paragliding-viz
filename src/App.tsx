@@ -36,10 +36,17 @@ const App: React.FC = () => {
     setTrackVisibility(newVisibility);
 
     if (newTracks.length > 0) {
-      // Try to extract task from the first track
-      const task = getTaskFromIGC(newTracks[0]);
-      if (task) {
-        setTask(task);
+      // Try to extract task from the first track ONLY if no task is currently loaded
+      // Actually, user might want to see the task from the file? 
+      // Current behavior: getTaskFromIGC checks for C-records.
+      // If we already have a task (from file), do we overwrite it? 
+      // Usually manual task load should win.
+      if (!task) {
+        const extractedTask = getTaskFromIGC(newTracks[0]);
+        if (extractedTask) {
+          setTask(extractedTask);
+          // If we extracted a task, its points are in the track, so track timezone logic below applies.
+        }
       }
 
       // Set date from first track
@@ -47,22 +54,54 @@ const App: React.FC = () => {
         setTrackDate(JulianDate.fromDate(new Date(newTracks[0].date)));
       }
 
-      // key: Detect Timezone from first point of first track
-      if (newTracks[0].fixes.length > 0) {
+      // Detect Timezone from first point of first track
+      // ONLY if no task is loaded, OR if the task doesn't dictate a location (rare)
+      // PRD: "If a task is loaded, determine the timezone based on the location of the task"
+      // So if 'task' is present, we shouldn't change timezone here? 
+      // But 'task' state might be stale in this callback if setTask was called above?
+      // Use a functional update or check `task` ref?
+      // Simpler: If we just loaded a task (extracted), we use track location. 
+      // If we have a manual task, we stick to it.
+      // Let's rely on the fact that if a manual task is loaded, `task` is not null.
+
+      // We need to know if a task IS loaded. 
+      // For now, let's set it if NO task is present.
+      // Caution: 'task' in closure is from render.
+      if (!task && newTracks[0].fixes.length > 0) {
         const firstFix = newTracks[0].fixes[0];
         try {
           const tz = tzlookup(firstFix.latitude, firstFix.longitude);
           setTimezone(tz);
         } catch (e) {
-          console.warn("Failed to detect timezone", e);
+          console.warn("Failed to detect timezone from track", e);
           setTimezone('UTC');
         }
       }
     }
-  }, []);
+  }, [task]); // Add task dependency
+
+  // Thermal Map State
+  const [showThermal, setShowThermal] = useState(false);
+  const [thermalOpacity, setThermalOpacity] = useState(0.5);
+
+  // Task Visibility State (Default true, but effective only if task exists)
+  const [showTask, setShowTask] = useState(true);
 
   const handleTaskLoaded = (newTask: XCTask) => {
     setTask(newTask);
+    setShowTask(true); // Ensure task is visible when new one loaded
+
+    // Detect Timezone from Task (Priority)
+    if (newTask.turnpoints && newTask.turnpoints.length > 0) {
+      try {
+        const tp = newTask.turnpoints[0]; // Use first turnpoint (Takeoff or SSS)
+        const tz = tzlookup(tp.lat, tp.lon);
+        setTimezone(tz);
+        console.log("Set timezone from task:", tz);
+      } catch (e) {
+        console.warn("Failed to detect timezone from task", e);
+      }
+    }
   };
 
   const handleTrailLengthChange = (option: TrailLengthOption) => {
@@ -99,7 +138,12 @@ const App: React.FC = () => {
         padding: '10px',
         boxSizing: 'border-box'
       }}>
-        <TaskLoader onTaskLoaded={handleTaskLoaded} task={task} />
+        <TaskLoader
+          onTaskLoaded={handleTaskLoaded}
+          task={task}
+          timezone={timezone}
+          trackDate={JulianDate.toDate(trackDate)}
+        />
         <TrackLoader onTracksLoaded={handleTracksLoaded} />
 
         {/* Settings Widget */}
@@ -114,7 +158,7 @@ const App: React.FC = () => {
           <select
             value={trailLengthOption}
             onChange={(e) => handleTrailLengthChange(e.target.value as TrailLengthOption)}
-            style={{ width: '100%', padding: '5px' }}
+            style={{ width: '100%', padding: '5px', marginBottom: '10px' }}
           >
             <option value="10min">10 min trail</option>
             <option value="20min">20 min trail</option>
@@ -122,6 +166,47 @@ const App: React.FC = () => {
             <option value="60min">60 min trail</option>
             <option value="all">Full track</option>
           </select>
+
+          <label style={{ display: 'block', marginBottom: 5, fontWeight: 'bold' }}>Map Overlays</label>
+
+          {/* Task Visibility Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '5px', opacity: task ? 1 : 0.5 }}>
+            <input
+              type="checkbox"
+              checked={showTask}
+              onChange={(e) => setShowTask(e.target.checked)}
+              id="task-toggle"
+              disabled={!task}
+              style={{ marginRight: '8px' }}
+            />
+            <label htmlFor="task-toggle" style={{ cursor: task ? 'pointer' : 'default' }}>Show Task</label>
+          </div>
+
+          {/* Thermal Map Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '5px' }}>
+            <input
+              type="checkbox"
+              checked={showThermal}
+              onChange={(e) => setShowThermal(e.target.checked)}
+              id="thermal-toggle"
+              style={{ marginRight: '8px' }}
+            />
+            <label htmlFor="thermal-toggle" style={{ cursor: 'pointer' }}>Show KK7 Thermals</label>
+          </div>
+          {showThermal && (
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.8em', marginRight: '5px', width: '50px' }}>Opacity:</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={thermalOpacity}
+                onChange={(e) => setThermalOpacity(parseFloat(e.target.value))}
+                style={{ flex: 1 }}
+              />
+            </div>
+          )}
         </div>
 
         {/* Pilot List taking remaining space */}
@@ -139,12 +224,15 @@ const App: React.FC = () => {
       <div style={{ flex: 1, position: 'relative' }}>
         <Viewer
           tracks={tracks}
-          task={task}
+          task={task} // Always pass the task object if it exists
+          showTask={showTask} // Control visibility via prop
           trackDate={trackDate}
           trailLength={trailLength}
           visibility={trackVisibility}
           timezone={timezone}
           onStatsUpdate={setPilotStats}
+          showThermal={showThermal}
+          thermalOpacity={thermalOpacity}
         />
       </div>
     </div>
