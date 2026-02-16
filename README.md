@@ -51,7 +51,7 @@ Built with **React**, **TypeScript**, **Vite**, and **CesiumJS** (via Resium).
 
 ## Product Requirements
 
-For a detailed breakdown of the functional and non-functional requirements, features, and future roadmap, please refer to the **[Product Requirements Document (PRD)](./prd.md)**.
+For a detailed breakdown of the functional and non-functional requirements, features, and future roadmap, please refer to the **[Product Requirements Document (PRD)](./PRD.md)**.
 
 ## Project Structure
 
