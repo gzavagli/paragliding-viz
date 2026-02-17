@@ -49,14 +49,15 @@ const Viewer: React.FC<ViewerProps> = ({
       // Find existing thermal layer
       for (let i = 0; i < layers.length; i++) {
         const layer = layers.get(i);
+        // Check for 'kk7' in URL to match both old direct URL and new proxy URL
         if (layer.imageryProvider instanceof UrlTemplateImageryProvider &&
-          (layer.imageryProvider as any).url.indexOf('thermal.kk7.ch') !== -1) {
+          (layer.imageryProvider as any).url.indexOf('kk7') !== -1) {
           thermalLayer = layer;
           break;
         }
       }
 
-      // If we disabled it due to errors, ensure it is removed/hidden
+      // If we disabled it due to errors, ensure it is removed
       if (thermalDisabled) {
         if (thermalLayer) {
           layers.remove(thermalLayer);
@@ -67,9 +68,16 @@ const Viewer: React.FC<ViewerProps> = ({
       if (showThermal) {
         if (!thermalLayer) {
           const provider = new UrlTemplateImageryProvider({
-            url: 'https://thermal.kk7.ch/tiles/thermal/{z}/{x}/{y}.png',
+            url: '/tiles/kk7/thermals_all_all/{z}/{x}/{reverseY}.png?src=localhost',
             maximumLevel: 12,
-            credit: 'KK7 Thermal Map'
+            credit: 'KK7 Thermal Map',
+            customTags: {
+              reverseY: (imageryProvider: UrlTemplateImageryProvider, _x: number, y: number, level: number) => {
+                const s = imageryProvider.tilingScheme;
+                const yTiles = s.getNumberOfYTilesAtLevel(level);
+                return (yTiles - y - 1).toString();
+              }
+            }
           });
 
           // Handle connection errors

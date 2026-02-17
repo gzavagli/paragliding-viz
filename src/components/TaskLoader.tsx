@@ -14,12 +14,41 @@ const TaskLoader: React.FC<TaskLoaderProps> = ({ onTaskLoaded, task }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isCollapsed, setIsCollapsed] = React.useState(false);
 
-  // Auto-expand when a new task is loaded
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-expand and start collapse timer when a new task is loaded
   React.useEffect(() => {
     if (task) {
       setIsCollapsed(false);
+
+      // Clear any existing timer
+      if (timerRef.current) clearTimeout(timerRef.current);
+
+      // Set new timer to collapse after 5 seconds
+      timerRef.current = setTimeout(() => {
+        setIsCollapsed(true);
+        timerRef.current = null;
+      }, 5000);
     }
+    return () => {
+      // Cleanup timer on unmount or task change
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
   }, [task]);
+
+  const handleToggleCollapse = () => {
+    // Determine new state
+    const newState = !isCollapsed;
+    setIsCollapsed(newState);
+
+    // If user interacts, clear the auto-collapse timer
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -129,7 +158,7 @@ const TaskLoader: React.FC<TaskLoaderProps> = ({ onTaskLoaded, task }) => {
               padding: '5px',
               borderRadius: '4px'
             }}
-            onClick={() => setIsCollapsed(!isCollapsed)}
+            onClick={handleToggleCollapse}
             title="Click to toggle task details"
           >
             <span><strong>Dist:</strong> {taskStats.distance} km</span>
